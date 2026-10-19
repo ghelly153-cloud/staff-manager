@@ -3,7 +3,7 @@ services:
     name: staff-manager
     runtime: docker
     plan: free
-    region: singapore
+    region: oregon
     envVars:
       - key: SOURCE
         value: local
