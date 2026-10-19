@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: staff-manager
+    runtime: docker
+    plan: free
+    region: singapore
+    envVars:
+      - key: SOURCE
+        value: local
+      - key: LOCAL_WORKBOOK_PATH
+        value: /app/backend/test_workbook.xlsx
+      - key: DEV_AUTH
+        value: "1"
+      - key: DATA_DIR
+        value: /app/backend/data

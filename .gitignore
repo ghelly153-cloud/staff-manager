@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.pytest_cache/
+.coverage
+htmlcov/
+*.egg-info/
+dist/
+build/
+
+# Virtual environment
+venv/
+.venv/
+env/
+
+# Environment and secrets
+.env
+*.local.env
+
+# Application runtime state
+backend/data/backups/*
+!backend/data/backups/.gitkeep
+backend/data/*.log
+
+# IDE and OS
+.vscode/
+.idea/
+*.swp
+Thumbs.db
+.DS_Store
