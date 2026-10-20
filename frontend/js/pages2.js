@@ -313,6 +313,14 @@ export async function renderAttendance(main, query) {
       );
       if (!ok) return;
 
+      // 1. Instant Optimistic UI (0 ms)
+      const prevStates = unrecorded.map(r => ({ r, att: r.att }));
+      unrecorded.forEach(r => {
+        r.att = 'Present';
+        updateRowAndCardDom(r);
+      });
+      refreshKPIs();
+
       try {
         await api.post('/api/attendance/bulk', {
           date: f.date,
@@ -320,8 +328,13 @@ export async function renderAttendance(main, query) {
           refs: unrecorded.map(r => r.ref)
         });
         toast(`Marked ${unrecorded.length} staff as Present in ${targetSheet || 'sheet'}!`, 'ok');
-        renderAttendance(main, query);
       } catch (err) {
+        // Revert on error
+        prevStates.forEach(s => {
+          s.r.att = s.att;
+          updateRowAndCardDom(s.r);
+        });
+        refreshKPIs();
         toast(err.message || 'Bulk update failed', 'bad');
       }
     };
@@ -339,6 +352,14 @@ export async function renderAttendance(main, query) {
       );
       if (!ok) return;
 
+      // 1. Instant Optimistic UI (0 ms)
+      const prevStates = recorded.map(r => ({ r, att: r.att }));
+      recorded.forEach(r => {
+        r.att = 'Not Recorded';
+        updateRowAndCardDom(r);
+      });
+      refreshKPIs();
+
       try {
         await api.post('/api/attendance/bulk', {
           date: f.date,
@@ -346,8 +367,12 @@ export async function renderAttendance(main, query) {
           refs: recorded.map(r => r.ref)
         });
         toast(`Reset ${recorded.length} attendance records`, 'ok');
-        renderAttendance(main, query);
       } catch (err) {
+        prevStates.forEach(s => {
+          s.r.att = s.att;
+          updateRowAndCardDom(s.r);
+        });
+        refreshKPIs();
         toast(err.message || 'Reset failed', 'bad');
       }
     };

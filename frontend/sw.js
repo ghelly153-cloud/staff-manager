@@ -1,6 +1,6 @@
 // Service Worker for Staff Manager PWA.
 // App-shell caching ONLY. Employee data, API calls, and authentication routes are NEVER cached offline.
-const CACHE_NAME = 'staff-manager-shell-v4';
+const CACHE_NAME = 'staff-manager-shell-v5';
 const APP_SHELL = [
   '/',
   '/index.html',
