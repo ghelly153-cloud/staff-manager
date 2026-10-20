@@ -328,8 +328,42 @@ class Services:
                 return audit
             audit = self._wrap(go)
             warn = self._audit(actor, audit) if audit else None
-            self._finish()
-            return {"ok": True, "saved": len(audit), "warning": warn}
+            sn = self.sync.snapshot
+            ts = self.s.now_iso()
+            if sn and not any(dep for *_, dep in prepared):
+                for (e, d, status, notes, _expected, key, _dep) in prepared:
+                    val = None if status == "Not Recorded" else status
+                    rec = {
+                        "date": d,
+                        "emp_id": e["id"],
+                        "group": e["sheet"],
+                        "status": val,
+                        "notes": notes,
+                        "updated_at": ts,
+                        "updated_by": actor,
+                        "row": None,
+                    }
+                    sn.attendance.setdefault(e["id"], {})[d] = rec
+                    sn.attendance_by_date.setdefault(d, {})[e["id"]] = rec
+                for entry in audit:
+                    sn.audit.append({
+                        "ts": ts,
+                        "actor": actor,
+                        "action": entry["action"],
+                        "emp_id": entry.get("emp_id"),
+                        "group": entry.get("group"),
+                        "field": entry.get("field"),
+                        "before": entry.get("before"),
+                        "after": entry.get("after"),
+                        "note": entry.get("note"),
+                    })
+                self.sync.last_success = datetime.now()
+                self.sync.last_change_at = datetime.now()
+                self.sync._ok(True, "write")
+            else:
+                self._finish()
+            updated = [{"ref": e["id"], "name": e["name_display"], "date": d.isoformat(), "status": status} for (e, d, status, *_rest) in prepared]
+            return {"ok": True, "saved": len(audit), "warning": warn, "updated": updated}
 
     # ---------- employment status ----------
     def set_status(self, actor, items):

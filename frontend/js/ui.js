@@ -19,37 +19,49 @@ export function setKids(el, ...kids) {
 }
 
 export function num(x) {
-  return (x === null || x === undefined) ? '—' : Number(x).toLocaleString('en-IN');
+  return (x === null || x === undefined || x === '') ? '—' : Number(x).toLocaleString('en-IN');
 }
 
 export function inr(x) {
-  if (x === null || x === undefined) return '—';
+  if (x === null || x === undefined || x === '') return '—';
   return '₹' + Number(x).toLocaleString('en-IN', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
 }
 
 export function fdate(iso) {
   if (!iso) return '—';
-  const [y, m, d] = String(iso).split('-');
-  if (!y || !m || !d) return iso;
+  const parts = String(iso).split('T')[0].split('-');
+  if (parts.length !== 3) return String(iso);
+  const [y, m, d] = parts;
   return `${d}/${m}/${y}`;
 }
 
 export function today() {
-  const now = new Date();
-  const y = now.getFullYear();
-  const m = String(now.getMonth() + 1).padStart(2, '0');
-  const d = String(now.getDate()).padStart(2, '0');
-  return `${y}-${m}-${d}`;
+  if (window.__serverToday) return window.__serverToday;
+  try {
+    return new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Asia/Kolkata',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit'
+    }).format(new Date());
+  } catch (e) {
+    const now = new Date();
+    const y = now.getFullYear();
+    const m = String(now.getMonth() + 1).padStart(2, '0');
+    const d = String(now.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  }
 }
 
 export function badge(text, kind = 'grey') {
-  return h('span', { class: `badge b-${kind}` }, text);
+  return h('span', { class: `badge b-${kind}` }, text == null ? '—' : String(text));
 }
 
 export function statCard(label, val, subtext = '', kind = '') {
+  const displayVal = (val === null || val === undefined) ? '—' : String(val);
   return h('div', { class: `stat-card ${kind}` },
     h('div', { class: 'label' }, label),
-    h('div', { class: 'val' }, String(val)),
+    h('div', { class: 'val' }, displayVal),
     subtext ? h('div', { class: 'subtext' }, subtext) : null
   );
 }
@@ -82,27 +94,47 @@ export function toast(msg, kind = 'ok') {
 
 export function modal(title, bodyNode, onSave, saveLabel = 'Save changes') {
   return new Promise(resolve => {
-    const m = h('div', { class: 'modal' });
-    const close = () => { m.remove(); resolve(false); };
-    m.addEventListener('click', e => { if (e.target === m) close(); });
+    const prevFocus = document.activeElement;
+    const m = h('div', { class: 'modal', role: 'dialog', 'aria-modal': 'true' });
+    
+    const close = (val = false) => {
+      document.body.classList.remove('modal-open');
+      window.removeEventListener('keydown', onKeyDown);
+      m.remove();
+      if (prevFocus && typeof prevFocus.focus === 'function') {
+        try { prevFocus.focus(); } catch (e) {}
+      }
+      resolve(val);
+    };
+
+    const onKeyDown = (e) => {
+      if (e.key === 'Escape') close(false);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    document.body.classList.add('modal-open');
+
+    m.addEventListener('click', e => { if (e.target === m) close(false); });
     
     const card = h('div', { class: 'card' },
-      h('div', { class: 'card-header' },
-        h('h3', { class: 'card-title' }, title),
-        h('button', { class: 'btn sm', onclick: close }, '✕')
+      h('div', { class: 'modal-header' },
+        h('h3', { class: 'modal-title' }, title),
+        h('button', { class: 'modal-close-btn', 'aria-label': 'Close dialog', onclick: () => close(false) }, '✕')
       ),
-      h('div', { style: 'margin-bottom:1.25rem' }, bodyNode),
-      h('div', { style: 'display:flex;justify-content:flex-end;gap:0.5rem' },
-        h('button', { class: 'btn', onclick: close }, 'Cancel'),
+      h('div', { class: 'modal-body' }, bodyNode),
+      h('div', { class: 'modal-footer' },
+        h('button', { class: 'btn', onclick: () => close(false) }, 'Cancel'),
         onSave ? h('button', {
           class: 'btn pri',
           onclick: async (e) => {
             e.target.disabled = true;
+            const originalText = e.target.textContent;
+            e.target.textContent = 'Saving…';
             try {
               const ok = await onSave();
-              if (ok !== false) { m.remove(); resolve(true); }
+              if (ok !== false) { close(true); }
             } finally {
               e.target.disabled = false;
+              e.target.textContent = originalText;
             }
           }
         }, saveLabel) : null
@@ -110,22 +142,49 @@ export function modal(title, bodyNode, onSave, saveLabel = 'Save changes') {
     );
     m.appendChild(card);
     document.body.appendChild(m);
+
+    // Auto-focus first input or button in dialog
+    setTimeout(() => {
+      const focusTarget = card.querySelector('input, select, textarea, button.pri');
+      if (focusTarget && typeof focusTarget.focus === 'function') {
+        focusTarget.focus();
+      }
+    }, 50);
   });
 }
 
 export function confirmBox(title, msg, confirmText = 'Confirm') {
   return new Promise(resolve => {
-    const m = h('div', { class: 'modal' });
-    const close = (val) => { m.remove(); resolve(val); };
+    const prevFocus = document.activeElement;
+    const m = h('div', { class: 'modal', role: 'dialog', 'aria-modal': 'true' });
+    
+    const close = (val) => {
+      document.body.classList.remove('modal-open');
+      window.removeEventListener('keydown', onKeyDown);
+      m.remove();
+      if (prevFocus && typeof prevFocus.focus === 'function') {
+        try { prevFocus.focus(); } catch (e) {}
+      }
+      resolve(val);
+    };
+
+    const onKeyDown = (e) => {
+      if (e.key === 'Escape') close(false);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    document.body.classList.add('modal-open');
+
     m.addEventListener('click', e => { if (e.target === m) close(false); });
     
     const card = h('div', { class: 'card' },
-      h('div', { class: 'card-header' },
-        h('h3', { class: 'card-title' }, title),
-        h('button', { class: 'btn sm', onclick: () => close(false) }, '✕')
+      h('div', { class: 'modal-header' },
+        h('h3', { class: 'modal-title' }, title),
+        h('button', { class: 'modal-close-btn', 'aria-label': 'Close dialog', onclick: () => close(false) }, '✕')
       ),
-      h('p', { style: 'font-size:0.92rem;color:var(--ink);margin-bottom:1.5rem;line-height:1.5' }, msg),
-      h('div', { style: 'display:flex;justify-content:flex-end;gap:0.5rem' },
+      h('div', { class: 'modal-body' },
+        h('p', { style: 'font-size:0.95rem;color:var(--ink);line-height:1.55;margin:0.25rem 0;' }, msg)
+      ),
+      h('div', { class: 'modal-footer' },
         h('button', { class: 'btn', onclick: () => close(false) }, 'Cancel'),
         h('button', { class: 'btn dng', onclick: () => close(true) }, confirmText)
       )

@@ -43,8 +43,15 @@ function svgIcon(pathD) {
 
 async function init() {
   try {
-    const authStatus = await api.get('/auth/status');
+    const [authStatus, boot] = await Promise.all([
+      api.get('/auth/status'),
+      api.get('/api/bootstrap').catch(() => null)
+    ]);
     serverStatus = authStatus;
+    if (boot) {
+      window.__bootstrap = boot;
+      if (boot.today) window.__serverToday = boot.today;
+    }
     if (!authStatus.authenticated) {
       renderLogin(authStatus);
       return;
@@ -168,20 +175,64 @@ function renderAppShell() {
   // Main Outlet
   const main = h('main', { id: 'main-content' });
 
-  // Mobile Bottom Nav
+  // Mobile "More" Drawer Sheet
+  const moreSheetBackdrop = h('div', { class: 'more-sheet-backdrop', onclick: closeMoreSheet });
+  const moreSheet = h('div', { class: 'more-sheet' },
+    h('div', { class: 'more-sheet-handle' }),
+    h('div', { style: 'font-weight:700;font-size:0.95rem;margin-bottom:0.75rem;padding:0 0.5rem;color:var(--ink);' }, 'More Operational Views'),
+    ...NAV_ITEMS.slice(4).map(item => h('a', {
+      class: 'more-sheet-item',
+      href: '#/' + item.id,
+      id: 'msheet-' + item.id,
+      onclick: closeMoreSheet
+    }, svgIcon(item.icon), h('span', {}, item.label))),
+    h('div', { style: 'border-top:1px solid var(--line);margin-top:0.75rem;padding-top:0.75rem;' },
+      h('button', {
+        class: 'more-sheet-item',
+        style: 'width:100%;color:var(--bad);background:none;border:none;cursor:pointer;',
+        onclick: () => { closeMoreSheet(); logout(); }
+      }, svgIcon('M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1'), h('span', {}, 'Sign Out'))
+    )
+  );
+
+  function openMoreSheet() {
+    moreSheetBackdrop.classList.add('open');
+    moreSheet.classList.add('open');
+  }
+
+  function closeMoreSheet() {
+    moreSheetBackdrop.classList.remove('open');
+    moreSheet.classList.remove('open');
+  }
+
+  // Mobile Bottom Nav with More ☰ action
   const bottomNav = h('nav', { class: 'bottom' },
-    ...NAV_ITEMS.slice(0, 5).map(item => {
+    ...NAV_ITEMS.slice(0, 4).map(item => {
       const a = h('a', { class: 'bnav', href: '#/' + item.id, id: 'bnav-' + (item.id || 'home') },
         svgIcon(item.icon),
         h('span', {}, item.label)
       );
       return a;
-    })
+    }),
+    h('button', {
+      class: 'bnav',
+      id: 'bnav-more',
+      type: 'button',
+      onclick: (e) => {
+        e.preventDefault();
+        openMoreSheet();
+      }
+    },
+      svgIcon('M4 6h16M4 12h16M4 18h16'),
+      h('span', {}, 'More ☰')
+    )
   );
 
   shell.appendChild(sidebar);
   shell.appendChild(main);
   shell.appendChild(bottomNav);
+  shell.appendChild(moreSheetBackdrop);
+  shell.appendChild(moreSheet);
   root.appendChild(shell);
 }
 
@@ -198,6 +249,9 @@ function handleRoute() {
   document.querySelectorAll('.bottom a.bnav').forEach(el => {
     el.classList.toggle('on', el.getAttribute('href') === '#/' + (base || ''));
   });
+  const moreRoutes = ['reports', 'departed', 'admin', 'sync'];
+  const moreBtn = document.getElementById('bnav-more');
+  if (moreBtn) moreBtn.classList.toggle('on', moreRoutes.includes(base));
 
   const main = document.getElementById('main-content');
   if (!main) return;

@@ -383,18 +383,27 @@ async function renderAuditTab(container) {
               h('th', {}, 'Timestamp'),
               h('th', {}, 'Operator'),
               h('th', {}, 'Action'),
-              h('th', {}, 'Record Reference'),
-              h('th', {}, 'Result Status')
+              h('th', {}, 'Staff / Target'),
+              h('th', {}, 'Audit Details')
             )
           ),
           h('tbody', {},
-            ...logs.map(lg => h('tr', {},
-              h('td', { style: 'font-size:0.82rem;color:var(--mut);' }, fdate(lg.timestamp ? lg.timestamp.split('T')[0] : '')),
-              h('td', { style: 'font-weight:600;' }, lg.user || 'System'),
-              h('td', {}, badge(lg.action || 'Mutation', 'grey')),
-              h('td', {}, lg.target || '—'),
-              h('td', {}, badge('Success', 'ok'))
-            ))
+            ...logs.map(lg => {
+              const ts = lg.ts || lg.timestamp || '';
+              const dateStr = ts ? ts.split('T')[0] : '';
+              const timeStr = ts && ts.includes('T') ? ts.split('T')[1].slice(0, 5) : '';
+              const user = lg.actor || lg.user || 'System';
+              const target = lg.emp_id ? (lg.emp_id + (lg.group ? ` (${lg.group})` : '')) : (lg.group || lg.target || '—');
+              const detail = lg.field ? `${lg.field}: ${lg.before != null ? lg.before : '—'} → ${lg.after != null ? lg.after : '—'}` : (lg.note || (lg.after != null ? String(lg.after) : '—'));
+
+              return h('tr', {},
+                h('td', { style: 'font-size:0.82rem;color:var(--mut);white-space:nowrap;' }, dateStr ? `${fdate(dateStr)} ${timeStr}` : '—'),
+                h('td', { style: 'font-weight:600;' }, user),
+                h('td', {}, badge(lg.action || 'Mutation', 'grey')),
+                h('td', { style: 'font-weight:500;' }, target),
+                h('td', { style: 'font-size:0.82rem;color:var(--ink);' }, detail)
+              );
+            })
           )
         )
       ) : empty('No mutations logged yet', 'Authorized employee edits, status changes, and setup runs will be recorded here.', '📜')

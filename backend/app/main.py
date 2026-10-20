@@ -215,6 +215,7 @@ def create_app(settings=None, adapter=None, token_provider=None, run_background=
                 "options": opts, "all_attendance_statuses": ALL_ATTENDANCE_STATUSES,
                 "config": {k: sn.config.get(k) for k in PUBLIC_CONFIG} if sn else None,
                 "id_setup_needed": sn.id_setup_needed if sn else None, "groups": sn.groups if sn else [],
+                "total_employees": len(sn.employees) if sn else 0,
                 "version": sn.version if sn else None}
 
     @app.get("/api/dashboard")
@@ -250,11 +251,26 @@ def create_app(settings=None, adapter=None, token_provider=None, run_background=
         emps = Q.filter_employees(sn, f)
         emps = Q.sort_employees(emps, p.get("sort"), p.get("dir") == "desc")
         sm = Q.summary(sn, emps, f["date"], _period(f), today)
-        size = max(5, min(200, int(p.get("page_size", 25))))
+        size = max(1, min(200, int(p.get("page_size", 25))))
         page = max(1, int(p.get("page", 1)))
+        total_pages = max(1, (len(emps) + size - 1) // size) if size else 1
         items = [Q.employee_row(sn, e, f["date"], _period(f)) for e in emps[(page - 1) * size: page * size]]
-        return {"items": items, "total": len(emps), "page": page, "page_size": size, "summary": sm,
+        return {"items": items, "total": len(emps), "total_pages": total_pages, "page": page, "page_size": size, "summary": sm,
                 "scope": "Filtered employees", "options": Q.options(sn)}
+
+    @app.get("/api/options")
+    def get_options(u=Depends(viewer)):
+        sn = svc.snap
+        opts = Q.options(sn) if sn else {}
+        cfg = sn.config if sn else {}
+        return {
+            "locations": opts.get("locations", []),
+            "designations": opts.get("designations", []),
+            "groups": sn.groups if sn else [],
+            "attendance_statuses": cfg.get("attendance_statuses") or ALL_ATTENDANCE_STATUSES,
+            "auto_assign_ids": settings.auto_assign_ids,
+            "timezone": settings.timezone,
+        }
 
     @app.get("/api/employees/{ref:path}")
     def employee(ref: str, request: Request, u=Depends(viewer)):
@@ -322,8 +338,9 @@ def create_app(settings=None, adapter=None, token_provider=None, run_background=
         emps = Q.sort_employees(Q.filter_employees(sn, f), "row", False)
         sm = Q.summary(sn, emps, f["date"], None, today)
         items = [Q.employee_row(sn, e, f["date"], None, with_pay=False) for e in emps]
+        has_records = any(bool(r.get("status")) for r in sn.attendance_by_date.get(f["date"], {}).values())
         return {"items": items, "summary": sm, "date": f["date"].isoformat(), "enabled_statuses": sn.config.get("attendance_statuses"),
-                "has_any_records": bool(sn.attendance_by_date.get(f["date"])), "read_only": sn.id_setup_needed}
+                "has_any_records": has_records, "read_only": sn.id_setup_needed}
 
     @app.post("/api/attendance")
     async def mark(request: Request, u=Depends(editor)):
@@ -414,7 +431,10 @@ def create_app(settings=None, adapter=None, token_provider=None, run_background=
                      recent=bool(e["dep_date"] and today - timedelta(days=rd) <= e["dep_date"] <= today),
                      outstanding="Not available — the workbook has no per-employee payments ledger")
             out.append(r)
-        return {"items": out, "total": len(out), "recent_days": rd, "summary": Q.summary(sn, emps, f["date"], _period(f), today)}
+        return {"items": out, "total": len(out), "recent_days": rd,
+                "active_count": sum(1 for e in sn.employees if e.get("status") != "Departed"),
+                "total_staff": len(sn.employees),
+                "summary": Q.summary(sn, emps, f["date"], _period(f), today)}
 
     # ---------- reports ----------
     @app.get("/api/reports")

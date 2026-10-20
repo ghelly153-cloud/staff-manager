@@ -131,3 +131,69 @@ def test_export_has_metadata_and_csv_injection_guard(env):
     wb = load_workbook(env.path); wb["Group One"]["B4"] = "-2+3 odd"; wb.save(env.path); env.sync.refresh(force=True)
     body = env.c.get("/api/reports/all_employees?format=csv").text
     assert "# Generated:" in body and "# Last synced:" in body and "'-2+3 odd" in body
+
+def test_total_pages_and_options_endpoint(env):
+    setup(env)
+    # Test employees pagination (5 active employees / page_size 2 = 3 pages)
+    res = env.c.get("/api/employees", params={"page_size": 2, "page": 1}).json()
+    assert "total_pages" in res
+    assert res["total_pages"] == 3
+    assert res["page"] == 1
+    assert len(res["items"]) == 2
+
+    # Test /api/options endpoint
+    opts = env.c.get("/api/options").json()
+    assert "locations" in opts and "designations" in opts
+    assert "groups" in opts and "attendance_statuses" in opts
+    assert "timezone" in opts and opts["timezone"] == "Asia/Kolkata"
+
+def test_datewise_historical_attendance_multi_dates(env):
+    setup(env); e1 = first(env, "Test Person 01"); e2 = first(env, "Test Person 02")
+    d1 = (TODAY - timedelta(days=10)).isoformat()
+    d2 = (TODAY - timedelta(days=5)).isoformat()
+    d_empty = (TODAY - timedelta(days=20)).isoformat()
+
+    # Empty date returns has_any_records: False
+    r_empty = env.c.get("/api/attendance", params={"date": d_empty}).json()
+    assert r_empty["has_any_records"] is False
+    assert all(it["att"] == "Not Recorded" for it in r_empty["items"])
+
+    # Mark d1: e1 Present, e2 Absent
+    r1 = env.c.post("/api/attendance", json={"items": [
+        {"ref": e1["id"], "date": d1, "status": "Present"},
+        {"ref": e2["id"], "date": d1, "status": "Absent"}
+    ], "confirmed": True}, headers=H)
+    assert r1.status_code == 200
+
+    # Mark d2: e1 Absent, e2 Present
+    r2 = env.c.post("/api/attendance", json={"items": [
+        {"ref": e1["id"], "date": d2, "status": "Absent"},
+        {"ref": e2["id"], "date": d2, "status": "Present"}
+    ], "confirmed": True}, headers=H)
+    assert r2.status_code == 200
+
+    # Retrieve d1: records match d1, not d2
+    att_d1 = env.c.get("/api/attendance", params={"date": d1}).json()
+    assert att_d1["has_any_records"] is True
+    row_e1_d1 = next(it for it in att_d1["items"] if it["id"] == e1["id"])
+    row_e2_d1 = next(it for it in att_d1["items"] if it["id"] == e2["id"])
+    assert row_e1_d1["att"] == "Present"
+    assert row_e2_d1["att"] == "Absent"
+
+    # Retrieve d2: records match d2, not d1
+    att_d2 = env.c.get("/api/attendance", params={"date": d2}).json()
+    assert att_d2["has_any_records"] is True
+    row_e1_d2 = next(it for it in att_d2["items"] if it["id"] == e1["id"])
+    row_e2_d2 = next(it for it in att_d2["items"] if it["id"] == e2["id"])
+    assert row_e1_d2["att"] == "Absent"
+    assert row_e2_d2["att"] == "Present"
+
+    # Verify d_empty is still empty and unaffected
+    r_empty2 = env.c.get("/api/attendance", params={"date": d_empty}).json()
+    assert r_empty2["has_any_records"] is False
+
+    # Verify reload / restart retains exact historical records in workbook
+    env.sync.refresh(force=True)
+    att_d1_after = env.c.get("/api/attendance", params={"date": d1}).json()
+    assert next(it for it in att_d1_after["items"] if it["id"] == e1["id"])["att"] == "Present"
+

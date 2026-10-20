@@ -64,60 +64,175 @@ export async function renderAttendance(main, query) {
       })}`;
     };
 
-    const updateStatus = async (ref, newStatus) => {
-      try {
-        await api.post(`/api/attendance/${encodeURIComponent(ref)}`, {
-          date: f.date,
-          status: newStatus
-        });
-        toast(`Attendance updated: ${newStatus}`, 'ok');
-        renderAttendance(main, query);
-      } catch (err) {
-        toast(err.message || 'Failed to update attendance', 'bad');
+    const refreshKPIs = () => {
+      const scoped = f.sheet ? items.filter(r => r.group === f.sheet) : items;
+      const p = scoped.filter(r => r.status !== 'Departed' && r.att === 'Present').length;
+      const a = scoped.filter(r => r.status !== 'Departed' && r.att === 'Absent').length;
+      const d = scoped.filter(r => r.status === 'Departed').length;
+      const pend = scoped.filter(r => r.status !== 'Departed' && (!r.att || r.att === 'Not Recorded')).length;
+
+      const elP = document.getElementById('kpi-att-present');
+      if (elP) elP.textContent = num(p);
+      const elA = document.getElementById('kpi-att-absent');
+      if (elA) elA.textContent = num(a);
+      const elD = document.getElementById('kpi-att-departed');
+      if (elD) elD.textContent = num(d);
+      const elPend = document.getElementById('kpi-att-pending');
+      if (elPend) elPend.textContent = num(pend);
+    };
+
+    const updateRowAndCardDom = (r) => {
+      const isDep = r.status === 'Departed';
+      const curAtt = r.att || 'Not Recorded';
+      const safeId = r.ref.replace(/[^a-zA-Z0-9_-]/g, '_');
+
+      // Update Desktop Table Row
+      const tr = document.getElementById(`att-row-${safeId}`);
+      if (tr) {
+        const statusCell = tr.querySelector('.status-cell');
+        if (statusCell) {
+          setKids(statusCell,
+            isDep ? badge('Departed', 'warn') :
+            curAtt === 'Present' ? badge('Present', 'ok') :
+            curAtt === 'Absent' ? badge('Absent', 'bad') :
+            badge('Not Recorded', 'grey')
+          );
+        }
+        const btnPresent = tr.querySelector('.btn-att-present');
+        if (btnPresent) btnPresent.className = `btn-att-present ${!isDep && curAtt === 'Present' ? 'on Present' : ''}`;
+        const btnAbsent = tr.querySelector('.btn-att-absent');
+        if (btnAbsent) btnAbsent.className = `btn-att-absent ${!isDep && curAtt === 'Absent' ? 'on Absent' : ''}`;
+        const btnDeparted = tr.querySelector('.btn-att-departed');
+        if (btnDeparted) btnDeparted.className = `btn-att-departed ${isDep ? 'on Departed' : ''}`;
+        const btnReset = tr.querySelector('.btn-att-reset');
+        if (btnReset) btnReset.style.display = (!isDep && curAtt !== 'Not Recorded' && canEdit) ? 'inline-flex' : 'none';
+      }
+
+      // Update Mobile Card
+      const card = document.getElementById(`att-card-${safeId}`);
+      if (card) {
+        const statusBadge = card.querySelector('.ecard-status-badge');
+        if (statusBadge) {
+          setKids(statusBadge,
+            isDep ? badge('Departed', 'warn') :
+            curAtt === 'Present' ? badge('Present', 'ok') :
+            curAtt === 'Absent' ? badge('Absent', 'bad') :
+            badge('Not Recorded', 'grey')
+          );
+        }
+        const mBtnP = card.querySelector('.mbtn-present');
+        if (mBtnP) mBtnP.className = `btn sm mbtn-present ${!isDep && curAtt === 'Present' ? 'teal' : ''}`;
+        const mBtnA = card.querySelector('.mbtn-absent');
+        if (mBtnA) mBtnA.className = `btn sm mbtn-absent ${!isDep && curAtt === 'Absent' ? 'dng' : ''}`;
+        const mBtnD = card.querySelector('.mbtn-departed');
+        if (mBtnD) mBtnD.className = `btn sm mbtn-departed ${isDep ? 'warn' : ''}`;
+        const mBtnReset = card.querySelector('.mbtn-reset');
+        if (mBtnReset) mBtnReset.style.display = (!isDep && curAtt !== 'Not Recorded' && canEdit) ? 'inline-flex' : 'none';
       }
     };
 
-    const markStaffPresent = async (r) => {
+    const updateStatus = async (r, newStatus, btn) => {
+      const prevAtt = r.att;
+      const prevStatus = r.status;
+
+      // 1. INSTANT OPTIMISTIC FEEDBACK (0 ms)
+      r.att = newStatus;
+      updateRowAndCardDom(r);
+      refreshKPIs();
+      if (btn) btn.classList.add('saving');
+
+      try {
+        const res = await api.post(`/api/attendance/${encodeURIComponent(r.ref)}`, {
+          date: f.date,
+          status: newStatus
+        });
+        if (res && (res.ok || res.saved != null)) {
+          if (btn) btn.classList.remove('saving');
+        } else {
+          // Revert if rejected
+          r.att = prevAtt;
+          r.status = prevStatus;
+          updateRowAndCardDom(r);
+          refreshKPIs();
+          toast((res && res.error) || 'Failed to save attendance', 'bad');
+        }
+      } catch (err) {
+        // Revert on network failure
+        r.att = prevAtt;
+        r.status = prevStatus;
+        updateRowAndCardDom(r);
+        refreshKPIs();
+        toast(err.message || 'Failed to update attendance', 'bad');
+      } finally {
+        if (btn) btn.classList.remove('saving');
+      }
+    };
+
+    const markStaffPresent = async (r, btn) => {
       if (r.status === 'Departed') {
         const ok = await confirmBox(
           'Reactivate Departed Employee',
           `Restore ${r.name} to Active employee status and mark Present for ${fdate(f.date)}?`
         );
         if (!ok) return;
+        const prevStatus = r.status;
+        const prevAtt = r.att;
+        r.status = 'Active';
+        r.att = 'Present';
+        updateRowAndCardDom(r);
+        refreshKPIs();
+        if (btn) btn.classList.add('saving');
         try {
           await api.post(`/api/status/${encodeURIComponent(r.ref)}`, { status: 'Active' });
           await api.post(`/api/attendance/${encodeURIComponent(r.ref)}`, { date: f.date, status: 'Present' });
           toast(`${r.name} reinstated and marked Present!`, 'ok');
-          renderAttendance(main, query);
         } catch (err) {
+          r.status = prevStatus;
+          r.att = prevAtt;
+          updateRowAndCardDom(r);
+          refreshKPIs();
           toast(err.message || 'Action failed', 'bad');
+        } finally {
+          if (btn) btn.classList.remove('saving');
         }
       } else {
-        updateStatus(r.ref, 'Present');
+        updateStatus(r, 'Present', btn);
       }
     };
 
-    const markStaffAbsent = async (r) => {
+    const markStaffAbsent = async (r, btn) => {
       if (r.status === 'Departed') {
         const ok = await confirmBox(
           'Reactivate Departed Employee',
           `Restore ${r.name} to Active employee status and mark Absent for ${fdate(f.date)}?`
         );
         if (!ok) return;
+        const prevStatus = r.status;
+        const prevAtt = r.att;
+        r.status = 'Active';
+        r.att = 'Absent';
+        updateRowAndCardDom(r);
+        refreshKPIs();
+        if (btn) btn.classList.add('saving');
         try {
           await api.post(`/api/status/${encodeURIComponent(r.ref)}`, { status: 'Active' });
           await api.post(`/api/attendance/${encodeURIComponent(r.ref)}`, { date: f.date, status: 'Absent' });
           toast(`${r.name} reinstated and marked Absent!`, 'ok');
-          renderAttendance(main, query);
         } catch (err) {
+          r.status = prevStatus;
+          r.att = prevAtt;
+          updateRowAndCardDom(r);
+          refreshKPIs();
           toast(err.message || 'Action failed', 'bad');
+        } finally {
+          if (btn) btn.classList.remove('saving');
         }
       } else {
-        updateStatus(r.ref, 'Absent');
+        updateStatus(r, 'Absent', btn);
       }
     };
 
-    const markStaffDeparted = async (r) => {
+    const markStaffDeparted = async (r, btn) => {
       if (r.status === 'Departed') {
         toast(`${r.name} is currently recorded as Departed. Use Present or Absent to reinstate.`, 'info');
         return;
@@ -163,6 +278,10 @@ export async function renderAttendance(main, query) {
           toast('Departure date is required', 'bad');
           return false;
         }
+        const prevStatus = r.status;
+        r.status = 'Departed';
+        updateRowAndCardDom(r);
+        refreshKPIs();
         try {
           await api.post(`/api/status/${encodeURIComponent(r.ref)}`, {
             status: 'Departed',
@@ -170,9 +289,11 @@ export async function renderAttendance(main, query) {
             reason: notes ? `${depReason}: ${notes}` : depReason
           });
           toast(`${r.name} marked as Departed`, 'ok');
-          renderAttendance(main, query);
           return true;
         } catch (err) {
+          r.status = prevStatus;
+          updateRowAndCardDom(r);
+          refreshKPIs();
           toast(err.message || 'Failed to record departure', 'bad');
           return false;
         }
@@ -264,6 +385,25 @@ export async function renderAttendance(main, query) {
         )
       ),
 
+      // Date Mode Banners
+      f.date !== today() ? h('div', { class: 'banner info', style: 'margin-bottom:1rem;display:flex;align-items:center;gap:0.65rem;' },
+        h('div', {},
+          h('strong', {}, `📅 Historical Attendance Mode: ${fdate(f.date)}`),
+          h('div', { style: 'font-size:0.82rem;margin-top:0.2rem;' },
+            `You are viewing saved historical records for ${fdate(f.date)}. Past attendance is safely retrieved from persistent storage. Changes made here persist specifically for this date without altering current or other dates.`
+          )
+        )
+      ) : null,
+
+      !attData.has_any_records ? h('div', { class: 'banner warn', style: 'margin-bottom:1rem;display:flex;align-items:center;gap:0.65rem;' },
+        h('div', {},
+          h('strong', {}, `No Attendance Recorded for ${fdate(f.date)}`),
+          h('div', { style: 'font-size:0.82rem;margin-top:0.2rem;' },
+            `No attendance has been saved for this date yet. Select Present or Absent below, or click "Mark All Active Present" above to record attendance.`
+          )
+        )
+      ) : null,
+
       // CONVENIENT SHEET-WISE TABS
       h('div', { style: 'margin-bottom:1.25rem;' },
         h('div', { style: 'display:flex;justify-content:space-between;align-items:center;margin-bottom:0.45rem;' },
@@ -289,28 +429,28 @@ export async function renderAttendance(main, query) {
         h('div', { style: 'background:var(--ok-bg);border:1px solid #bbf7d0;border-radius:var(--r-sm);padding:0.75rem 1rem;display:flex;justify-content:space-between;align-items:center;cursor:pointer;', onclick: () => navTo({ statusFilter: f.statusFilter === 'present' ? '' : 'present' }) },
           h('div', {},
             h('div', { style: 'font-size:0.75rem;font-weight:700;color:var(--ok);text-transform:uppercase;' }, `${f.sheet || 'Total'} Present`),
-            h('div', { style: 'font-size:1.45rem;font-weight:700;color:var(--ok);' }, num(presentCount))
+            h('div', { class: 'val', id: 'kpi-att-present', style: 'font-size:1.45rem;font-weight:700;color:var(--ok);' }, num(presentCount))
           ),
           badge('Present Today', 'ok')
         ),
         h('div', { style: 'background:var(--bad-bg);border:1px solid #fecaca;border-radius:var(--r-sm);padding:0.75rem 1rem;display:flex;justify-content:space-between;align-items:center;cursor:pointer;', onclick: () => navTo({ statusFilter: f.statusFilter === 'absent' ? '' : 'absent' }) },
           h('div', {},
             h('div', { style: 'font-size:0.75rem;font-weight:700;color:var(--bad);text-transform:uppercase;' }, `${f.sheet || 'Total'} Absent`),
-            h('div', { style: 'font-size:1.45rem;font-weight:700;color:var(--bad);' }, num(absentCount))
+            h('div', { class: 'val', id: 'kpi-att-absent', style: 'font-size:1.45rem;font-weight:700;color:var(--bad);' }, num(absentCount))
           ),
           badge('Absent Today', 'bad')
         ),
         h('div', { style: 'background:#fef3c7;border:1px solid #fde68a;border-radius:var(--r-sm);padding:0.75rem 1rem;display:flex;justify-content:space-between;align-items:center;cursor:pointer;', onclick: () => navTo({ statusFilter: f.statusFilter === 'departed' ? '' : 'departed' }) },
           h('div', {},
             h('div', { style: 'font-size:0.75rem;font-weight:700;color:#92400e;text-transform:uppercase;' }, `${f.sheet || 'Total'} Departed`),
-            h('div', { style: 'font-size:1.45rem;font-weight:700;color:#92400e;' }, num(departedCount))
+            h('div', { class: 'val', id: 'kpi-att-departed', style: 'font-size:1.45rem;font-weight:700;color:#92400e;' }, num(departedCount))
           ),
           badge('Departed', 'warn')
         ),
         h('div', { style: 'background:var(--grey-bg);border:1px solid var(--line);border-radius:var(--r-sm);padding:0.75rem 1rem;display:flex;justify-content:space-between;align-items:center;cursor:pointer;', onclick: () => navTo({ statusFilter: f.statusFilter === 'pending' ? '' : 'pending' }) },
           h('div', {},
             h('div', { style: 'font-size:0.75rem;font-weight:700;color:var(--mut);text-transform:uppercase;' }, `${f.sheet || 'Total'} Pending`),
-            h('div', { style: 'font-size:1.45rem;font-weight:700;color:var(--ink);' }, num(notRecordedCount))
+            h('div', { class: 'val', id: 'kpi-att-pending', style: 'font-size:1.45rem;font-weight:700;color:var(--ink);' }, num(notRecordedCount))
           ),
           badge('Pending Marking', 'grey')
         )
@@ -396,15 +536,16 @@ export async function renderAttendance(main, query) {
                   ...sheetStaff.map(r => {
                     const isDep = r.status === 'Departed';
                     const curAtt = r.att || 'Not Recorded';
+                    const safeId = r.ref.replace(/[^a-zA-Z0-9_-]/g, '_');
 
-                    return h('tr', {},
+                    return h('tr', { id: `att-row-${safeId}` },
                       h('td', { style: 'font-weight:600;' },
                         h('a', { href: `#/employee/${encodeURIComponent(r.ref)}` }, r.name),
                         r.id ? h('div', { style: 'font-size:0.75rem;color:var(--mut);font-weight:400;' }, r.id) : null
                       ),
                       h('td', {}, r.designation || '—'),
                       h('td', {}, r.location || '—'),
-                      h('td', {},
+                      h('td', { class: 'status-cell' },
                         isDep ? badge('Departed', 'warn') :
                         curAtt === 'Present' ? badge('Present', 'ok') :
                         curAtt === 'Absent' ? badge('Absent', 'bad') :
@@ -413,28 +554,29 @@ export async function renderAttendance(main, query) {
                       h('td', { style: 'text-align:right;' },
                         h('div', { class: 'att' },
                           h('button', {
-                            class: !isDep && curAtt === 'Present' ? 'on Present' : '',
+                            class: `btn-att-present ${!isDep && curAtt === 'Present' ? 'on Present' : ''}`,
                             disabled: !canEdit,
                             title: isDep ? 'Click to reactivate staff and mark Present' : 'Mark staff Present today',
-                            onclick: () => markStaffPresent(r)
+                            onclick: (e) => markStaffPresent(r, e.currentTarget)
                           }, 'Present'),
                           h('button', {
-                            class: !isDep && curAtt === 'Absent' ? 'on Absent' : '',
+                            class: `btn-att-absent ${!isDep && curAtt === 'Absent' ? 'on Absent' : ''}`,
                             disabled: !canEdit,
                             title: isDep ? 'Click to reactivate staff and mark Absent' : 'Mark staff Absent today',
-                            onclick: () => markStaffAbsent(r)
+                            onclick: (e) => markStaffAbsent(r, e.currentTarget)
                           }, 'Absent'),
                           h('button', {
-                            class: isDep ? 'on Departed' : '',
+                            class: `btn-att-departed ${isDep ? 'on Departed' : ''}`,
                             disabled: !canEdit,
                             title: isDep ? 'Employee is Departed' : 'Mark employee as Departed',
-                            onclick: () => markStaffDeparted(r)
+                            onclick: (e) => markStaffDeparted(r, e.currentTarget)
                           }, 'Departed'),
-                          !isDep && curAtt !== 'Not Recorded' && canEdit ? h('button', {
-                            class: 'btn sm',
+                          h('button', {
+                            class: 'btn sm btn-att-reset',
+                            style: `display:${(!isDep && curAtt !== 'Not Recorded' && canEdit) ? 'inline-flex' : 'none'};`,
                             title: 'Reset to Not Recorded',
-                            onclick: () => updateStatus(r.ref, 'Not Recorded')
-                          }, '✕') : null
+                            onclick: (e) => updateStatus(r, 'Not Recorded', e.currentTarget)
+                          }, '✕')
                         )
                       )
                     );
@@ -447,39 +589,43 @@ export async function renderAttendance(main, query) {
                 ...sheetStaff.map(r => {
                   const isDep = r.status === 'Departed';
                   const curAtt = r.att || 'Not Recorded';
+                  const safeId = r.ref.replace(/[^a-zA-Z0-9_-]/g, '_');
 
-                  return h('div', { class: 'ecard' },
+                  return h('div', { class: 'ecard', id: `att-card-${safeId}` },
                     h('div', { class: 'ecard-top' },
                       h('a', { class: 'ecard-name', href: `#/employee/${encodeURIComponent(r.ref)}` }, r.name),
-                      isDep ? badge('Departed', 'warn') :
-                      curAtt === 'Present' ? badge('Present', 'ok') :
-                      curAtt === 'Absent' ? badge('Absent', 'bad') :
-                      badge('Not Recorded', 'grey')
+                      h('div', { class: 'ecard-status-badge' },
+                        isDep ? badge('Departed', 'warn') :
+                        curAtt === 'Present' ? badge('Present', 'ok') :
+                        curAtt === 'Absent' ? badge('Absent', 'bad') :
+                        badge('Not Recorded', 'grey')
+                      )
                     ),
                     h('div', { class: 'ecard-meta' }, `${r.designation || 'Staff'} · ${r.location || 'Location missing'}`),
                     h('div', { style: 'display:flex;gap:0.4rem;margin-top:0.75rem;flex-wrap:wrap;' },
                       h('button', {
-                        class: `btn sm ${!isDep && curAtt === 'Present' ? 'teal' : ''}`,
+                        class: `btn sm mbtn-present ${!isDep && curAtt === 'Present' ? 'teal' : ''}`,
                         style: 'flex:1;justify-content:center;min-width:70px;',
                         disabled: !canEdit,
-                        onclick: () => markStaffPresent(r)
+                        onclick: (e) => markStaffPresent(r, e.currentTarget)
                       }, 'Present'),
                       h('button', {
-                        class: `btn sm ${!isDep && curAtt === 'Absent' ? 'dng' : ''}`,
+                        class: `btn sm mbtn-absent ${!isDep && curAtt === 'Absent' ? 'dng' : ''}`,
                         style: 'flex:1;justify-content:center;min-width:70px;',
                         disabled: !canEdit,
-                        onclick: () => markStaffAbsent(r)
+                        onclick: (e) => markStaffAbsent(r, e.currentTarget)
                       }, 'Absent'),
                       h('button', {
-                        class: `btn sm ${isDep ? 'warn' : ''}`,
+                        class: `btn sm mbtn-departed ${isDep ? 'warn' : ''}`,
                         style: `flex:1;justify-content:center;min-width:75px;${isDep ? 'background:#fef3c7;border-color:#f59e0b;color:#92400e;font-weight:700;' : ''}`,
                         disabled: !canEdit,
-                        onclick: () => markStaffDeparted(r)
+                        onclick: (e) => markStaffDeparted(r, e.currentTarget)
                       }, 'Departed'),
-                      !isDep && curAtt !== 'Not Recorded' && canEdit ? h('button', {
-                        class: 'btn sm',
-                        onclick: () => updateStatus(r.ref, 'Not Recorded')
-                      }, '✕') : null
+                      h('button', {
+                        class: 'btn sm mbtn-reset',
+                        style: `display:${(!isDep && curAtt !== 'Not Recorded' && canEdit) ? 'inline-flex' : 'none'};`,
+                        onclick: (e) => updateStatus(r, 'Not Recorded', e.currentTarget)
+                      }, '✕')
                     )
                   );
                 })
@@ -524,7 +670,7 @@ export async function renderPayroll(main, query) {
       h('div', { class: 'grid g3', style: 'margin-bottom:1.25rem;' },
         h('div', { class: 'stat-card' },
           h('div', { class: 'label' }, 'Total Recorded Staff'),
-          h('div', { class: 'val' }, num(payData.employees ? payData.employees.length : 251)),
+          h('div', { class: 'val' }, num((payData.rows || payData.employees || []).length || (payData.summary && payData.summary.total) || 0)),
           h('div', { class: 'subtext' }, 'Across all master sheets')
         ),
         h('div', { class: 'stat-card primary' },
@@ -822,7 +968,7 @@ export async function renderDeparted(main, query) {
         ),
         h('div', { class: 'stat-card success' },
           h('div', { class: 'label' }, 'Active Workforce'),
-          h('div', { class: 'val' }, num(251 - items.length)),
+          h('div', { class: 'val' }, num(data.active_count != null ? data.active_count : (data.total_staff ? data.total_staff - items.length : ((bootstrap.total_employees || 0) - items.length)))),
           h('div', { class: 'subtext' }, 'Currently engaged staff')
         )
       ),

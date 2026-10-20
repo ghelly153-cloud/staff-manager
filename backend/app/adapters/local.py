@@ -18,6 +18,8 @@ class LocalAdapter(Adapter):
         self.path, self.backup_dir = path, backup_dir
         self._lock = threading.RLock()
         self._backed_up = False
+        self._wb = None
+        self._wb_mtime = 0
         self._resolve_path()
         if not os.path.exists(self.path):
             raise WorkbookError("not_found", f"Test workbook not found: {os.path.basename(self.path)}")
@@ -79,21 +81,38 @@ class LocalAdapter(Adapter):
     def read_sheet(self, name):
         return self.read_all()["sheets"].get(name)
 
+    def _get_open_wb(self):
+        mtime = os.path.getmtime(self.path) if os.path.exists(self.path) else 0
+        if self._wb is None or getattr(self, "_wb_mtime", 0) != mtime:
+            self._wb = load_workbook(self.path)
+            self._wb_mtime = mtime
+        return self._wb
+
     def _save(self, wb):
         tmp = self.path + ".tmp"
         wb.save(tmp)
         os.replace(tmp, self.path)
+        self._wb_mtime = os.path.getmtime(self.path) if os.path.exists(self.path) else 0
 
     def _backup_once(self):
         if not self._backed_up:
             self.backup("auto-before-first-write")
             self._backed_up = True
 
+    def _sync_cache_from_wb(self, wb):
+        try:
+            ver = self.get_version()
+            # Generate grid directly from in-memory workbook
+            sheets = {ws.title: self._grid(ws, ws) for ws in wb.worksheets}
+            self._cache = (ver, sheets)
+        except Exception:
+            self._cache = None
+
     def write_cells(self, sheet, cells):
         self._check_fail()
         with self._lock:
             self._backup_once()
-            wb = load_workbook(self.path)
+            wb = self._get_open_wb()
             if sheet not in wb.sheetnames:
                 raise WorkbookError("not_found", f"Sheet “{sheet}” not found")
             ws = wb[sheet]
@@ -105,6 +124,7 @@ class LocalAdapter(Adapter):
                 else:
                     c.value = v
             self._save(wb)
+            self._sync_cache_from_wb(wb)
 
     def write_block(self, sheet, top_left, rows):
         r0, c0 = coordinate_to_tuple(top_left)
@@ -118,18 +138,19 @@ class LocalAdapter(Adapter):
         self._check_fail()
         with self._lock:
             self._backup_once()
-            wb = load_workbook(self.path)
+            wb = self._get_open_wb()
             ws = wb[sheet]
             first = ws.max_row + 1 if any(c.value is not None for c in ws[ws.max_row]) else ws.max_row
             for i, row in enumerate(rows):
                 for j, v in enumerate(row):
                     ws.cell(first + i, j + 1).value = v
             self._save(wb)
+            self._sync_cache_from_wb(wb)
             return first
 
     def ensure_sheet(self, name, headers):
         with self._lock:
-            wb = load_workbook(self.path)
+            wb = self._get_open_wb()
             if name in wb.sheetnames:
                 return False
             self._check_fail()
@@ -141,6 +162,7 @@ class LocalAdapter(Adapter):
             for col in ("A", "B"):
                 ws.column_dimensions[col].width = 22
             self._save(wb)
+            self._sync_cache_from_wb(wb)
             return True
 
     def backup(self, label):

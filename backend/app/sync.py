@@ -52,14 +52,18 @@ class SyncService:
         st = self.state
         if st == "connected" and self._stale():
             st = "stale"
+        is_live = bool(self.adapter.is_live_production)
+        base_label = LABELS.get(st, st)
+        if not is_live and st == "connected":
+            base_label = "Local Test Copy (Connected)"
         return {
-            "state": st, "label": LABELS.get(st, st),
+            "state": st, "label": base_label,
             "last_success": self.last_success.isoformat(timespec="seconds") if self.last_success else None,
             "last_attempt": self.last_attempt.isoformat(timespec="seconds") if self.last_attempt else None,
             "last_change": self.last_change_at.isoformat(timespec="seconds") if self.last_change_at else None,
             "last_error": self.last_error, "interval_seconds": self.s.sync_interval_seconds,
             "version": self.snapshot.version if self.snapshot else None, "webhook": self.webhook,
-            "source": self.adapter.describe(), "live": bool(self.adapter.is_live_production),
+            "source": self.adapter.describe(), "live": is_live,
             "consecutive_failures": self.consecutive_failures,
         }
 

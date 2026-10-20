@@ -362,21 +362,24 @@ export async function renderEmployees(main, query) {
       ) : empty('No staff found', 'Try adjusting your search query or filters to find employees.', '🔍'),
 
       // Pagination
-      empData.total_pages > 1 ? h('div', { style: 'display:flex;justify-content:center;gap:0.5rem;margin-top:1.5rem;' },
-        h('button', {
-          class: 'btn sm',
-          disabled: f.page <= 1,
-          onclick: () => navTo({ page: f.page - 1 })
-        }, '‹ Previous'),
-        h('span', { style: 'display:flex;align-items:center;font-size:0.85rem;color:var(--mut);padding:0 0.5rem;' },
-          `Page ${f.page} of ${empData.total_pages}`
-        ),
-        h('button', {
-          class: 'btn sm',
-          disabled: f.page >= empData.total_pages,
-          onclick: () => navTo({ page: f.page + 1 })
-        }, 'Next ›')
-      ) : null
+      (() => {
+        const totalPages = empData.total_pages || Math.ceil((empData.total || 0) / f.page_size);
+        return totalPages > 1 ? h('div', { style: 'display:flex;justify-content:center;gap:0.5rem;margin-top:1.5rem;' },
+          h('button', {
+            class: 'btn sm',
+            disabled: f.page <= 1,
+            onclick: () => navTo({ page: f.page - 1 })
+          }, '‹ Previous'),
+          h('span', { style: 'display:flex;align-items:center;font-size:0.85rem;color:var(--mut);padding:0 0.5rem;' },
+            `Page ${f.page} of ${totalPages}`
+          ),
+          h('button', {
+            class: 'btn sm',
+            disabled: f.page >= totalPages,
+            onclick: () => navTo({ page: f.page + 1 })
+          }, 'Next ›')
+        ) : null;
+      })()
     );
 
     setKids(main, content);
@@ -542,8 +545,34 @@ function openEditEmployeeModal(emp, bootstrap, onSuccess) {
     name: emp.name,
     designation: emp.designation || '',
     location: emp.location || '',
-    status: emp.status || 'Not Verified'
+    mobile: emp.mobile || '',
+    status: emp.status || 'Not Verified',
+    dep_date: emp.dep_date || today(),
+    dep_reason: emp.dep_reason || 'Resigned'
   };
+
+  const depSection = h('div', { id: 'edit-dep-section', style: v.status === 'Departed' ? 'display:flex;flex-direction:column;gap:0.75rem;padding:0.75rem;background:#fef3c7;border-radius:var(--r-sm);border:1px solid #fde68a;' : 'display:none;flex-direction:column;gap:0.75rem;padding:0.75rem;background:#fef3c7;border-radius:var(--r-sm);border:1px solid #fde68a;' },
+    h('div', {},
+      h('label', { style: 'color:#92400e;font-weight:600;' }, 'Departure Date *'),
+      h('input', {
+        type: 'date',
+        value: v.dep_date,
+        max: today(),
+        onchange: (e) => v.dep_date = e.target.value
+      })
+    ),
+    h('div', {},
+      h('label', { style: 'color:#92400e;font-weight:600;' }, 'Departure Reason'),
+      h('select', { onchange: (e) => v.dep_reason = e.target.value },
+        h('option', { value: 'Resigned', selected: v.dep_reason === 'Resigned' }, 'Resigned (Voluntary)'),
+        h('option', { value: 'Contract Completed', selected: v.dep_reason === 'Contract Completed' }, 'Contract Completed'),
+        h('option', { value: 'Seasonal Exit', selected: v.dep_reason === 'Seasonal Exit' }, 'Seasonal Exit'),
+        h('option', { value: 'Relocated', selected: v.dep_reason === 'Relocated' }, 'Relocated'),
+        h('option', { value: 'Health / Personal', selected: v.dep_reason === 'Health / Personal' }, 'Health / Personal'),
+        h('option', { value: 'Other', selected: v.dep_reason === 'Other' }, 'Other')
+      )
+    )
+  );
 
   const body = h('div', { class: 'filters-grid', style: 'grid-template-columns:1fr;gap:0.75rem;' },
     h('div', {},
@@ -570,13 +599,28 @@ function openEditEmployeeModal(emp, bootstrap, onSuccess) {
       )
     ),
     h('div', {},
+      h('label', {}, 'Mobile Number (10 digits)'),
+      h('input', {
+        type: 'tel',
+        value: v.mobile,
+        placeholder: 'e.g. 9876543210',
+        oninput: (e) => v.mobile = e.target.value
+      })
+    ),
+    h('div', {},
       h('label', {}, 'Employment Status'),
-      h('select', { onchange: (e) => v.status = e.target.value },
+      h('select', {
+        onchange: (e) => {
+          v.status = e.target.value;
+          depSection.style.display = v.status === 'Departed' ? 'flex' : 'none';
+        }
+      },
         h('option', { value: 'Not Verified', selected: v.status === 'Not Verified' }, 'Not Verified (Pending verification)'),
         h('option', { value: 'Active', selected: v.status === 'Active' }, 'Active'),
         h('option', { value: 'Departed', selected: v.status === 'Departed' }, 'Departed')
       )
-    )
+    ),
+    depSection
   );
 
   modal('Edit Staff Record', body, async () => {
