@@ -3,8 +3,7 @@ import { api } from './api.js';
 import { h, setKids, num, inr, fdate, today, badge, statCard, policySafeguard, empty, toast, modal, qs } from './ui.js';
 
 export async function renderHome(main, query) {
-  const date = query.date || sessionStorage.getItem('date') || today();
-  sessionStorage.setItem('date', date);
+  const date = query.date || today();
 
   setKids(main, h('div', { style: 'padding:2rem;text-align:center;color:var(--mut)' }, 'Loading unified workforce metrics…'));
 
@@ -440,10 +439,42 @@ export async function renderEmployee(main, ref) {
               h('tr', {}, h('td', { style: 'color:var(--mut);' }, 'Designation'), h('td', {}, emp.designation || 'Not specified')),
               h('tr', {}, h('td', { style: 'color:var(--mut);' }, 'Location'), h('td', {}, emp.location || 'Not specified')),
               h('tr', {}, h('td', { style: 'color:var(--mut);' }, 'Mobile Phone'), h('td', {},
-                emp.mobile ? h('span', {}, emp.mobile) : h('span', { style: 'color:var(--mut);' }, 'Not on file')
+                emp.mobile ? h('span', { id: 'prof-mobile' }, emp.mobile) : h('span', { style: 'color:var(--mut);' }, 'Not on file'),
+                (isAdmin && emp.mobile) ? h('button', {
+                  class: 'btn sm',
+                  style: 'margin-left:0.6rem;padding:0.15rem 0.5rem;font-size:0.72rem;',
+                  onclick: async () => {
+                    try {
+                      const res = await api.post(`/api/employees/${encodeURIComponent(ref)}/reveal`, {});
+                      if (res && res.mobile) {
+                        const el = document.getElementById('prof-mobile');
+                        if (el) el.textContent = res.mobile;
+                        toast('Mobile number revealed and audited', 'ok');
+                      }
+                    } catch (err) {
+                      toast(err.message || 'Reveal failed', 'bad');
+                    }
+                  }
+                }, '👁️ Reveal') : null
               )),
               h('tr', {}, h('td', { style: 'color:var(--mut);' }, 'Aadhaar / Gov ID'), h('td', {},
-                emp.aadhaar ? h('span', {}, emp.aadhaar) : h('span', { style: 'color:var(--mut);' }, 'Not on file')
+                emp.aadhaar ? h('span', { id: 'prof-aadhaar' }, emp.aadhaar) : h('span', { style: 'color:var(--mut);' }, 'Not on file'),
+                (isAdmin && emp.aadhaar) ? h('button', {
+                  class: 'btn sm',
+                  style: 'margin-left:0.6rem;padding:0.15rem 0.5rem;font-size:0.72rem;',
+                  onclick: async () => {
+                    try {
+                      const res = await api.post(`/api/employees/${encodeURIComponent(ref)}/reveal`, {});
+                      if (res && res.aadhaar) {
+                        const el = document.getElementById('prof-aadhaar');
+                        if (el) el.textContent = res.aadhaar;
+                        toast('Aadhaar revealed and audited', 'ok');
+                      }
+                    } catch (err) {
+                      toast(err.message || 'Reveal failed', 'bad');
+                    }
+                  }
+                }, '👁️ Reveal') : null
               ))
             )
           )
@@ -460,7 +491,7 @@ export async function renderEmployee(main, ref) {
               h('tr', {}, h('td', { style: 'color:var(--mut);' }, 'Legacy Oct Days'), h('td', { class: 'n', style: 'font-weight:600;' }, num(emp.octo ? emp.octo.value : 0))),
               h('tr', {}, h('td', { style: 'color:var(--mut);' }, 'Date-wise Days'), h('td', { class: 'n', style: 'font-weight:600;' }, num(emp.datewise_days || 0))),
               h('tr', {}, h('td', { style: 'color:var(--mut);' }, 'Raw Spreadsheet Rate'), h('td', { class: 'n' }, emp.rate ? inr(emp.rate.value) : '—')),
-              h('tr', {}, h('td', { style: 'color:var(--mut);' }, 'Approved Amount'), h('td', { class: 'n' }, badge('₹0.00 (Unapproved)', 'indigo'))),
+              h('tr', {}, h('td', { style: 'color:var(--mut);' }, 'Approved Amount'), h('td', { class: 'n' }, badge('Amount not approved', 'warn'))),
               h('tr', {}, h('td', { style: 'color:var(--mut);' }, 'Departure Date'), h('td', {}, emp.dep_date ? fdate(emp.dep_date) : 'Active staff member'))
             )
           )

@@ -3,8 +3,7 @@ import { api } from './api.js';
 import { h, setKids, num, inr, fdate, today, badge, policySafeguard, empty, toast, confirmBox, modal, qs } from './ui.js';
 
 export async function renderAttendance(main, query) {
-  const date = query.date || sessionStorage.getItem('date') || today();
-  sessionStorage.setItem('date', date);
+  const date = query.date || today();
 
   const f = {
     date,
@@ -132,6 +131,8 @@ export async function renderAttendance(main, query) {
     };
 
     const updateStatus = async (r, newStatus, btn) => {
+      if (r._saving) return;
+      r._saving = true;
       const prevAtt = r.att;
       const prevStatus = r.status;
 
@@ -147,13 +148,23 @@ export async function renderAttendance(main, query) {
           status: newStatus
         });
         if (res && (res.ok || res.saved != null)) {
-          if (btn) btn.classList.remove('saving');
+          if (btn) {
+            btn.classList.remove('saving');
+            btn.classList.add('saved');
+            setTimeout(() => btn.classList.remove('saved'), 1500);
+          }
+          toast(`${r.name}: ${newStatus} saved & verified`, 'ok');
         } else {
           // Revert if rejected
           r.att = prevAtt;
           r.status = prevStatus;
           updateRowAndCardDom(r);
           refreshKPIs();
+          if (btn) {
+            btn.classList.remove('saving');
+            btn.classList.add('save-failed');
+            setTimeout(() => btn.classList.remove('save-failed'), 2000);
+          }
           toast((res && res.error) || 'Failed to save attendance', 'bad');
         }
       } catch (err) {
@@ -162,19 +173,28 @@ export async function renderAttendance(main, query) {
         r.status = prevStatus;
         updateRowAndCardDom(r);
         refreshKPIs();
-        toast(err.message || 'Failed to update attendance', 'bad');
+        if (btn) {
+          btn.classList.remove('saving');
+          btn.classList.add('save-failed');
+          setTimeout(() => btn.classList.remove('save-failed'), 2000);
+        }
+        const isConflict = err.code === 'conflict' || (err.message && err.message.toLowerCase().includes('conflict'));
+        toast(isConflict ? `Conflict: ${err.message}` : (err.message || 'Failed to update attendance'), 'bad');
       } finally {
+        r._saving = false;
         if (btn) btn.classList.remove('saving');
       }
     };
 
     const markStaffPresent = async (r, btn) => {
+      if (r._saving) return;
       if (r.status === 'Departed') {
         const ok = await confirmBox(
           'Reactivate Departed Employee',
           `Restore ${r.name} to Active employee status and mark Present for ${fdate(f.date)}?`
         );
         if (!ok) return;
+        r._saving = true;
         const prevStatus = r.status;
         const prevAtt = r.att;
         r.status = 'Active';
@@ -185,14 +205,25 @@ export async function renderAttendance(main, query) {
         try {
           await api.post(`/api/status/${encodeURIComponent(r.ref)}`, { status: 'Active' });
           await api.post(`/api/attendance/${encodeURIComponent(r.ref)}`, { date: f.date, status: 'Present' });
+          if (btn) {
+            btn.classList.remove('saving');
+            btn.classList.add('saved');
+            setTimeout(() => btn.classList.remove('saved'), 1500);
+          }
           toast(`${r.name} reinstated and marked Present!`, 'ok');
         } catch (err) {
           r.status = prevStatus;
           r.att = prevAtt;
           updateRowAndCardDom(r);
           refreshKPIs();
+          if (btn) {
+            btn.classList.remove('saving');
+            btn.classList.add('save-failed');
+            setTimeout(() => btn.classList.remove('save-failed'), 2000);
+          }
           toast(err.message || 'Action failed', 'bad');
         } finally {
+          r._saving = false;
           if (btn) btn.classList.remove('saving');
         }
       } else {
@@ -201,12 +232,14 @@ export async function renderAttendance(main, query) {
     };
 
     const markStaffAbsent = async (r, btn) => {
+      if (r._saving) return;
       if (r.status === 'Departed') {
         const ok = await confirmBox(
           'Reactivate Departed Employee',
           `Restore ${r.name} to Active employee status and mark Absent for ${fdate(f.date)}?`
         );
         if (!ok) return;
+        r._saving = true;
         const prevStatus = r.status;
         const prevAtt = r.att;
         r.status = 'Active';
@@ -217,14 +250,25 @@ export async function renderAttendance(main, query) {
         try {
           await api.post(`/api/status/${encodeURIComponent(r.ref)}`, { status: 'Active' });
           await api.post(`/api/attendance/${encodeURIComponent(r.ref)}`, { date: f.date, status: 'Absent' });
+          if (btn) {
+            btn.classList.remove('saving');
+            btn.classList.add('saved');
+            setTimeout(() => btn.classList.remove('saved'), 1500);
+          }
           toast(`${r.name} reinstated and marked Absent!`, 'ok');
         } catch (err) {
           r.status = prevStatus;
           r.att = prevAtt;
           updateRowAndCardDom(r);
           refreshKPIs();
+          if (btn) {
+            btn.classList.remove('saving');
+            btn.classList.add('save-failed');
+            setTimeout(() => btn.classList.remove('save-failed'), 2000);
+          }
           toast(err.message || 'Action failed', 'bad');
         } finally {
+          r._saving = false;
           if (btn) btn.classList.remove('saving');
         }
       } else {
@@ -705,7 +749,7 @@ export async function renderPayroll(main, query) {
         ),
         h('div', { class: 'stat-card danger' },
           h('div', { class: 'label' }, 'Authorized Payable Obligations'),
-          h('div', { class: 'val' }, '₹0.00'),
+          h('div', { class: 'val', style: 'font-size:1.15rem;color:var(--warn);' }, 'Amount not approved'),
           h('div', { class: 'subtext' }, 'All calculations withheld by policy')
         )
       ),
@@ -836,13 +880,27 @@ export async function renderReports(main, query) {
           h('table', {},
             h('thead', {},
               h('tr', {},
-                ...(reportData.columns || ['Group', 'Name', 'Location', 'Status']).map(col => h('th', {}, Array.isArray(col) ? col[1] : col))
+                ...(reportData.columns || []).map(col => {
+                  const label = (typeof col === 'object' && col !== null) ? (col.label || col.key) : (Array.isArray(col) ? col[1] : String(col));
+                  return h('th', {}, label);
+                })
               )
             ),
             h('tbody', {},
-              ...(reportData.rows || []).map(row => h('tr', {},
-                ...(Array.isArray(row) ? row : Object.values(row)).map(cell => h('td', {}, String(cell == null ? '—' : cell)))
-              ))
+              ...(reportData.rows || []).map(row => {
+                const cols = reportData.columns || [];
+                return h('tr', {},
+                  cols.length > 0 ? cols.map(col => {
+                    const k = (typeof col === 'object' && col !== null) ? col.key : (Array.isArray(col) ? col[0] : col);
+                    const v = (row && typeof row === 'object') ? row[k] : null;
+                    const display = (v == null || v === 'null' || v === 'None' || v === '') ? '—' : String(v);
+                    return h('td', {}, display);
+                  }) : (Array.isArray(row) ? row : Object.values(row)).map(cell => {
+                    const display = (cell == null || cell === 'null' || cell === 'None' || cell === '') ? '—' : String(cell);
+                    return h('td', {}, display);
+                  })
+                );
+              })
             )
           )
         )

@@ -179,8 +179,11 @@ def create_app(settings=None, adapter=None, token_provider=None, run_background=
 
     # ---------- basics ----------
     @app.get("/healthz")
+    @app.get("/health")
+    @app.get("/api/v1/health")
+    @app.get("/api/health")
     def healthz():
-        return {"ok": True}
+        return {"ok": True, "status": "healthy"}
 
     @app.get("/api/me")
     def me(u=Depends(viewer)):
@@ -591,6 +594,10 @@ def create_app(settings=None, adapter=None, token_provider=None, run_background=
         @app.get("/")
         def index():
             return FileResponse(FRONTEND / "index.html", headers={"Cache-Control": "no-cache"})
+
+        @app.get("/manifest.json", include_in_schema=False)
+        def manifest_json():
+            return FileResponse(FRONTEND / "manifest.webmanifest", media_type="application/manifest+json", headers={"Cache-Control": "no-cache"})
 
         for fn in ("index.html", "styles.css", "manifest.webmanifest", "sw.js", "favicon.svg"):
             def _mk(fn=fn):

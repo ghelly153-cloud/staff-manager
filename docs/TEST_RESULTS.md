@@ -8,8 +8,8 @@ This document provides the definitive verification record, automated test eviden
 
 - **Test Framework**: `pytest 9.1.1` on Python 3.15.0 (Win32 x64)
 - **Suite Command**: `python -m pytest backend/tests -v`
-- **Result**: **43 passed, 0 failed, 5 skipped** (100% of runnable local & mock integration tests passed)
-- **Execution Time**: ~20.13 seconds
+- **Result**: **63 passed, 0 failed, 5 skipped** (100% of all runnable local, integrity, and QA round tests passed)
+- **Execution Time**: ~26.21 seconds
 - **Skipped Tests**: 5 acceptance tests in `backend/tests/test_real_workbook.py`, intentionally skipped because `REAL_WORKBOOK_PATH` is unconfigured to safeguard the user's master files from mutation during QA.
 
 ### Test Breakdown by Module:
@@ -25,7 +25,30 @@ This document provides the definitive verification record, automated test eviden
    - Total Pages & Options: `/api/employees` returns accurate `total_pages` and `/api/options` returns configuration and Asia/Kolkata timezone.
 3. `backend/tests/test_graph.py` (11 tests):
    - Microsoft Graph Cloud Integration: Mocked OAuth 2.0 authorization flows, token acquisition, delta change-token queries, conflict resolution with ETag/cTag matching.
-4. `scripts/verify_e2e.py` (13 end-to-end integration checks):
+4. `backend/tests/test_qa_round1_functional.py` (9 tests):
+   - Health aliases (`/healthz`, `/health`, `/api/health`, `/api/v1/health`).
+   - Role session authorization (Viewer blocked, Editor allowed, Admin supreme).
+   - Unified bootstrap and dashboard data reconciliation.
+   - Staff list search, filtering, pagination, and PII masking.
+   - Employee profile editing, setup enforcement (`id_setup_required` 409 guard), write verification.
+   - Date-wise attendance persistence and today's date isolation.
+   - Status departure, reasons, reactivation, and audit trail retention.
+   - Report preview, CSV export, and financial lockout.
+   - Admin quality issues, options, and sync status truthfulness.
+5. `backend/tests/test_qa_round2_integrity.py` (6 tests):
+   - Multi-date attendance persistence, non-bleeding isolation, and disk reload resilience.
+   - Permanent employee ID immunity to Excel row moves / sorting reordering.
+   - Strict financial safeguards enforced universally across all endpoints.
+   - Tamper-evident audit log append behavior and viewer reveal lockout.
+   - Idempotent workbook setup (repeat runs assign 0 new IDs, duplicate no columns).
+   - Dashboard summary counts reconcile strictly with employee roster.
+6. `backend/tests/test_qa_round3_acceptance.py` (5 tests):
+   - Realistic operator day-in-the-life journey from sign-in to export.
+   - Clean structured error responses (404 not found, 422 validation, CSRF rejection).
+   - Frontend PWA manifest and service worker asset integrity.
+   - Mobile modal responsive CSS rules (no touch-action blocking, viewport bounds, wrap layout).
+   - JavaScript client compensation lockout and in-flight click debounce protections.
+7. `scripts/verify_e2e.py` (13 end-to-end integration checks):
    - Full live HTTP verification against `http://127.0.0.1:8000` verifying all 13 core business workflows in sequence.
 
 ---
